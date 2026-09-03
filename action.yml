@@ -1,0 +1,76 @@
+name: 'On-demand CI check status'
+description: >-
+  Publishes a commit status for an on-demand CI check, and consumes the `ci:*`
+  label that requested it. Call it twice per job: once first with no `status`,
+  once last with `status: ${{ job.status }}` under `if: always()`.
+
+  Why a commit status and not the job's own check row: the PR merge box draws
+  only the NEWEST run of each workflow, so a check's row is replaced by a later
+  request's skipped placeholder. A commit status belongs to no workflow run and
+  no check suite, so nothing can hide it - the same reason a code-scanning row
+  always persists.
+
+inputs:
+  context:
+    description: 'Status context — the row name in the PR merge box, e.g. "trivy".
+      Use the bare name any required status check is configured with.'
+    required: true
+  label:
+    description: 'Human name used in the status description. Defaults to `context`.'
+    required: false
+    default: ''
+  status:
+    description: 'Empty reports pending. Pass ${{ job.status }} to report the result.'
+    required: false
+    default: ''
+  consume-label:
+    description: 'Remove the ci:* label that triggered this run. Set false on the
+      second and later calls in a job that reports more than one context.'
+    required: false
+    default: 'true'
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/github-script@v7
+      env:
+        CHECK_CONTEXT: ${{ inputs.context }}
+        CHECK_LABEL: ${{ inputs.label || inputs.context }}
+        CHECK_STATUS: ${{ inputs.status }}
+        CONSUME_LABEL: ${{ inputs.consume-label }}
+      with:
+        script: |
+          const {CHECK_CONTEXT, CHECK_LABEL, CHECK_STATUS, CONSUME_LABEL} = process.env;
+          const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+          // The head SHA, not github.sha: on a pull_request event that is the
+          // merge commit, which the PR does not display statuses for.
+          const sha = context.payload.pull_request?.head?.sha || context.sha;
+
+          // Starting: release the trigger label so the check can be asked for
+          // again. Done in a step of the check itself rather than a job of its
+          // own because GitHub bills every job a whole minute.
+          const label = context.payload.label?.name;
+          if (!CHECK_STATUS && CONSUME_LABEL === 'true' && label?.startsWith('ci:')) {
+            try {
+              await github.rest.issues.removeLabel({
+                ...context.repo,
+                issue_number: context.payload.pull_request.number,
+                name: label,
+              });
+            } catch (e) {
+              core.info(`label already gone: ${e.message}`);   // a double-add 404s
+            }
+          }
+
+          await github.rest.repos.createCommitStatus({
+            ...context.repo,
+            sha,
+            context: CHECK_CONTEXT,
+            // `error` reads as "did not complete", which is what a cancel is.
+            state: !CHECK_STATUS            ? 'pending'
+                 : CHECK_STATUS === 'success'   ? 'success'
+                 : CHECK_STATUS === 'cancelled' ? 'error'
+                 :                                'failure',
+            description: `${CHECK_LABEL} ${CHECK_STATUS || 'running'}`,
+            target_url: url,
+          });
