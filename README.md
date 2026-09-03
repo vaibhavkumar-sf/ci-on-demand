@@ -77,6 +77,21 @@ second call skip the label release:
 To keep the two results independent, give the bundled step `continue-on-error: true` and pass
 its `steps.<id>.outcome` as `status` instead of `job.status`.
 
+## Releasing
+
+`v1` is a moving tag — consumers pin `@v1` and pick fixes up automatically:
+
+```sh
+git tag -a v1.0.1 -m v1.0.1 && git push origin v1.0.1
+git tag -f v1     -m v1     && git push -f origin v1
+```
+
+Do not cut a `v1.0.1` without also moving `v1`, or nobody sees the fix.
+
+**Never put a `${{ }}` expression in this file's `description:` fields**, not even inside
+backticks. GitHub evaluates action metadata as a template, so prose mentioning
+`job.status` in an expression fails the whole action with "Unrecognized named-value".
+
 ## Adopting the whole pattern
 
 1. Create the `ci:*` labels in the repository.

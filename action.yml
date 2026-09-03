@@ -2,7 +2,7 @@ name: 'On-demand CI check status'
 description: >-
   Publishes a commit status for an on-demand CI check, and consumes the `ci:*`
   label that requested it. Call it twice per job: once first with no `status`,
-  once last with `status: ${{ job.status }}` under `if: always()`.
+  once last with the job's own status under `if: always()`.
 
   Why a commit status and not the job's own check row: the PR merge box draws
   only the NEWEST run of each workflow, so a check's row is replaced by a later
@@ -20,7 +20,7 @@ inputs:
     required: false
     default: ''
   status:
-    description: 'Empty reports pending. Pass ${{ job.status }} to report the result.'
+    description: 'Empty reports pending. Pass the job status expression to report the result.'
     required: false
     default: ''
   consume-label:
