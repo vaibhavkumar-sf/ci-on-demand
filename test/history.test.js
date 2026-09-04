@@ -231,6 +231,19 @@ test('a finished run has its duration corrected by the next check', () => {
   assert.strictEqual(merged.c, 'trivy', 'the status context was lost to the workflow name');
 });
 
+test('a real context survives repeated reconciliation, not just one round', () => {
+  // Regression: the guard kept the name but left the reconstructed-name flag
+  // set, so the third write saw the flag on both sides and let the workflow
+  // name through. Reconciliation runs on EVERY check, so this was two writes
+  // away at all times.
+  const real = run({c: 'trivy'});
+  const api = run({c: 'Trivy Scan', w: 1});
+  let stored = H.mergeEntries([], [api], [real]);
+  for (let i = 0; i < 5; i++) stored = H.mergeEntries(stored, [api]);
+  assert.strictEqual(stored[0].c, 'trivy', 'the workflow name displaced the status context');
+  assert.ok(!stored[0].w, 'the reconstructed-name flag outlived the reconstructed name');
+});
+
 test('a reconstructed name is replaced once the real context is known', () => {
   const reconstructed = run({c: 'Trivy Scan', w: 1});
   const real = run({c: 'trivy'});
