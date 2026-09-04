@@ -31,6 +31,11 @@ function stub({body = '', runs = [], onUpdate} = {}) {
   const github = {
     rest: {
       pulls: {
+        // One call labels every commit group, including groups rebuilt purely
+        // from the API by a run that never wrote a row of its own.
+        async listCommits() {
+          return {data: [{sha: context.sha, commit: {message: 'feat(ci): a subject\n\nbody'}}]};
+        },
         async get() { state.gets++; return {data: {body: state.body}}; },
         async update({body: next}) {
           state.updates++;
@@ -39,9 +44,6 @@ function stub({body = '', runs = [], onUpdate} = {}) {
       },
       actions: {
         async listWorkflowRunsForRepo() { return {data: {workflow_runs: runs}}; },
-      },
-      repos: {
-        async getCommit() { return {data: {commit: {message: 'feat(ci): a subject\n\nbody'}}}; },
       },
     },
   };
@@ -89,6 +91,18 @@ process.env.GITHUB_TRIGGERING_ACTOR = 'github-actions[bot]';
     await updateRunHistory({...BASE, github, prNumber: ''});
     assert.strictEqual(state.updates, 0);
     assert.strictEqual(state.gets, 0);
+  });
+
+  await test('a group rebuilt from the API is still labelled with its subject', async () => {
+    const {github, state} = stub({
+      runs: [{id: 222, run_attempt: 1, event: 'workflow_dispatch', name: 'AI Code Review',
+        status: 'completed', conclusion: 'failure', head_sha: context.sha,
+        run_started_at: '2026-09-04T09:00:00Z', updated_at: '2026-09-04T09:00:20Z',
+        triggering_actor: {login: 'github-actions[bot]'}}],
+    });
+    await updateRunHistory({...BASE, github});
+    assert.ok(H.readEntries(state.body).every(e => e.m === 'feat(ci): a subject'),
+      'a reconciled row was left without a commit subject');
   });
 
   await test('reconcile records a run whose job never started', async () => {

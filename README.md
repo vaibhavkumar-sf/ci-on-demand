@@ -116,6 +116,10 @@ attempt, actor and run id come from `context`, and its start time from an env va
 call exported. Older rows travel in a JSON payload inside the start marker — **the PR body is
 the store**, and rendered markdown is never parsed back into data.
 
+The job needs **`actions: read`** for that, on top of `pull-requests: write` — a
+`permissions:` block sets every scope it does not name to `none`, so omitting it makes the
+call 403 with `Resource not accessible by integration`, silently.
+
 `history-reconcile` adds one `listWorkflowRunsForRepo` call, filtered to
 `event == workflow_dispatch` so the dispatcher workflow never appears in its own table. It
 covers the two cases the local context cannot: a row lost when two checks finished in the
