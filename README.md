@@ -127,7 +127,9 @@ same second and read-modify-wrote the same body, and a run whose job never start
 Delimited by `<!-- ci-run-history:start … -->` and `<!-- ci-run-history:end -->`, and **not
 one byte outside those markers is ever read or modified**. Placement, in order: replace in
 place if the markers exist (so a block someone moved stays moved) → otherwise insert
-immediately *above* an `----AI-description----` separator → otherwise append.
+immediately *above* an `----AI-description----` separator **on a line of its own** →
+otherwise append. The line anchor is not cosmetic: a description that *mentions* the
+separator in prose would otherwise have the table spliced into the middle of a sentence.
 
 That middle rule matters if you also run
 [`ai-pr-review-action`](https://github.com/vaibhavkumar-sf/ai-pr-review-action): it rebuilds

@@ -100,6 +100,19 @@ test('AI body: the human half survives byte-for-byte', () => {
   assert.strictEqual(head, AI_BODY.slice(0, AI_BODY.indexOf('----AI-description----')).trimEnd());
 });
 
+test('a separator mentioned mid-sentence is not mistaken for the real one', () => {
+  const prose = 'It rebuilds everything above `----AI-description----` and drops the rest.\n';
+  const out = H.buildBody(`## Description\n\n${prose}`, [run()], OPTS);
+  assert.ok(out.indexOf(prose) < out.indexOf(H.START_PREFIX),
+    'the block was spliced into the middle of a sentence');
+  assert.ok(out.includes(prose), 'the sentence was broken up');
+});
+
+test('a real separator on its own line still wins', () => {
+  const out = H.buildBody('## Description\n\nmine\n\n----AI-description----\n\nAI half\n', [run()], OPTS);
+  assert.ok(out.indexOf(H.START_PREFIX) < out.indexOf('\n----AI-description----'));
+});
+
 test('second write replaces in place, adds a row, and touches nothing else', () => {
   const first = H.buildBody(AI_BODY, [run()], OPTS);
   const second = H.buildBody(first, [run(), run({r: 2, s: 'failure', at: '2026-09-04T09:31:00Z'})], OPTS);
