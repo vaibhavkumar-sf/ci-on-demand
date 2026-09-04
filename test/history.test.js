@@ -282,6 +282,28 @@ test('an unresolvable zone falls back to UTC instead of throwing', () => {
   assert.strictEqual(H.formatStarted('2026-09-04T14:18:22Z'), '2026-09-04 14:18');
 });
 
+test('# counts this check\'s runs on this commit, not GitHub run_attempt', () => {
+  // Re-requesting a check dispatches a NEW run, so every row carries
+  // run_attempt 1 and the column read "1" forever.
+  const out = H.buildBody('', [
+    run({r: 1, c: 'trivy', sha: 'aaa', at: '2026-09-04T10:00:00Z'}),
+    run({r: 2, c: 'npm lint', sha: 'aaa', at: '2026-09-04T10:05:00Z'}),
+    run({r: 3, c: 'trivy', sha: 'aaa', at: '2026-09-04T10:10:00Z'}),
+    run({r: 4, c: 'trivy', sha: 'bbb', at: '2026-09-04T11:00:00Z'}),
+  ], OPTS);
+  const nth = out.split('\n').filter(l => l.startsWith('| trivy |'))
+    .map(l => l.split('|')[5].trim());
+  assert.deepStrictEqual(nth, ['1', '1', '2'], 'ordinal did not restart per commit');
+  const lint = out.split('\n').find(l => l.startsWith('| npm lint |'));
+  assert.strictEqual(lint.split('|')[5].trim(), '1', 'ordinal is not per check');
+});
+
+test('a genuine GitHub re-run is still shown', () => {
+  const out = H.buildBody('', [run({r: 1, a: 3, sha: 'aaa'})], OPTS);
+  const row = out.split('\n').find(l => l.startsWith('| trivy |'));
+  assert.strictEqual(row.split('|')[5].trim(), '1 ↻3');
+});
+
 test('durations read the way a human reads a clock', () => {
   assert.strictEqual(H.formatDuration(9), '9s');
   assert.strictEqual(H.formatDuration(94), '1m 34s');

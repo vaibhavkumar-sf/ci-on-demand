@@ -134,6 +134,14 @@ Passing the login as a dispatch input would be exact rather than inferred. It wa
 because a dispatch carrying an input the target workflow does not declare fails with **422**,
 so every already-open PR would break until it was updated from the default branch.
 
+### The `#` column
+
+How many times **that check has run on that commit**, not GitHub's `run_attempt`.
+`run_attempt` only moves when somebody presses *Re-run jobs* on an existing run; re-requesting
+a check with a label dispatches a brand new run, so on an on-demand setup the value is
+structurally `1` forever and the column says nothing. A genuine GitHub re-run is still worth
+seeing, so it is appended as `2 ↻3`.
+
 ### Times
 
 Stored as UTC, rendered in `history-timezone`. Changing the zone re-renders history already
