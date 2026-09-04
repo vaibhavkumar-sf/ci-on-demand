@@ -226,6 +226,20 @@ test('mergeEntries: a re-run is a new row, not a replacement', () => {
   assert.strictEqual(merged.length, 2);
 });
 
+test('the Started column renders in the configured zone, header and all', () => {
+  const out = H.buildBody('', [run({at: '2026-09-04T14:18:22Z'})],
+    {...OPTS, timeZone: 'Asia/Kolkata', timeZoneLabel: 'IST'});
+  assert.ok(out.includes('Started (IST)'), 'header still says UTC');
+  assert.ok(out.includes('2026-09-04 19:48'), 'time not shifted to +05:30');
+  // Stored as UTC regardless, so switching zones re-renders old rows too.
+  assert.strictEqual(H.readEntries(out)[0].at, '2026-09-04T14:18:22Z');
+});
+
+test('an unresolvable zone falls back to UTC instead of throwing', () => {
+  assert.strictEqual(H.formatStarted('2026-09-04T14:18:22Z', 'Not/AZone'), '2026-09-04 14:18');
+  assert.strictEqual(H.formatStarted('2026-09-04T14:18:22Z'), '2026-09-04 14:18');
+});
+
 test('durations read the way a human reads a clock', () => {
   assert.strictEqual(H.formatDuration(9), '9s');
   assert.strictEqual(H.formatDuration(94), '1m 34s');

@@ -26,7 +26,7 @@ async function test(name, fn) {
 
 const core = {info() {}, warning(m) { core.warnings.push(m); }, warnings: []};
 
-function stub({body = '', runs = [], onUpdate} = {}) {
+function stub({body = '', runs = [], timeline = [], onUpdate} = {}) {
   const state = {body, updates: 0, gets: 0};
   const github = {
     rest: {
@@ -44,6 +44,11 @@ function stub({body = '', runs = [], onUpdate} = {}) {
       },
       actions: {
         async listWorkflowRunsForRepo() { return {data: {workflow_runs: runs}}; },
+      },
+      issues: {
+        // Both actors are github-actions[bot] on a dispatched run, so the
+        // timeline is the only place the requester survives.
+        async listEventsForTimeline() { return {data: timeline}; },
       },
     },
   };
@@ -194,6 +199,50 @@ process.env.GITHUB_TRIGGERING_ACTOR = 'github-actions[bot]';
     const entries = H.readEntries(state.body);
     assert.strictEqual(entries.length, 2);
     assert.deepStrictEqual(entries.map(e => e.s), ['success', 'failure']);
+  });
+
+  await test('the requester is the human who added the label, not the bot', async () => {
+    const startedAt = new Date(Date.now() - 60000).toISOString();
+    const {github, state} = stub({
+      runs: [{id: 111, run_attempt: 1, event: 'workflow_dispatch', name: 'Trivy Scan',
+        status: 'in_progress', conclusion: null, head_sha: context.sha,
+        run_started_at: startedAt, updated_at: new Date().toISOString(),
+        triggering_actor: {login: 'github-actions[bot]'}}],
+      timeline: [
+        {event: 'labeled', label: {name: 'enhancement'}, actor: {login: 'someone-else'},
+          created_at: new Date(Date.now() - 70000).toISOString()},
+        {event: 'labeled', label: {name: 'ci:trivy'}, actor: {login: 'a-human'},
+          created_at: new Date(Date.now() - 65000).toISOString()},
+      ],
+    });
+    await updateRunHistory({...BASE, github});
+    assert.strictEqual(H.readEntries(state.body)[0].by, 'a-human');
+  });
+
+  await test('a stale label from an hour ago does not steal credit', async () => {
+    // An Actions-tab run: no label was added, and GITHUB_TRIGGERING_ACTOR is
+    // already the person who pressed the button.
+    process.env.GITHUB_TRIGGERING_ACTOR = 'ran-it-by-hand';
+    const startedAt = new Date(Date.now() - 60000).toISOString();
+    const {github, state} = stub({
+      runs: [{id: 111, run_attempt: 1, event: 'workflow_dispatch', name: 'Trivy Scan',
+        status: 'in_progress', conclusion: null, head_sha: context.sha,
+        run_started_at: startedAt, updated_at: new Date().toISOString(),
+        triggering_actor: {login: 'ran-it-by-hand'}}],
+      timeline: [{event: 'labeled', label: {name: 'ci:trivy'}, actor: {login: 'a-human'},
+        created_at: new Date(Date.now() - 3600000).toISOString()}],
+    });
+    await updateRunHistory({...BASE, github});
+    assert.strictEqual(H.readEntries(state.body)[0].by, 'ran-it-by-hand',
+      'an Actions-tab run must keep its own actor');
+    process.env.GITHUB_TRIGGERING_ACTOR = 'github-actions[bot]';
+  });
+
+  await test('a timeline failure leaves the actor in place', async () => {
+    const {github, state} = stub();
+    github.rest.issues.listEventsForTimeline = async () => { throw new Error('403'); };
+    await updateRunHistory({...BASE, github, reconcile: false});
+    assert.strictEqual(H.readEntries(state.body)[0].by, 'github-actions[bot]');
   });
 
   await test('a reconcile failure does not lose the stored history', async () => {

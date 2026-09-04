@@ -1,6 +1,6 @@
 {
   "name": "ci-on-demand",
-  "version": "1.1.4",
+  "version": "1.2.0",
   "private": true,
   "description": "Composite action: commit-status reporting, ci:* label release, and a PR run-history table for on-demand CI",
   "scripts": {

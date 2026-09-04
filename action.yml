@@ -54,6 +54,19 @@ inputs:
       never started (cancelled while queued, or startup_failure).'
     required: false
     default: 'true'
+  history-timezone:
+    description: 'IANA zone the Started column is rendered in, e.g. Asia/Kolkata.
+      Times are stored as UTC either way, so changing this re-renders history
+      already in the body rather than stranding old rows in the old zone. Falls
+      back to UTC if the runner cannot resolve the zone.'
+    required: false
+    default: 'UTC'
+  history-timezone-label:
+    description: 'What the Started column is headed, e.g. IST. Defaults to the
+      zone id, because a short name derived from the zone reads as GMT+5:30
+      rather than IST.'
+    required: false
+    default: ''
   history-max-commits:
     description: 'How many commits the table keeps. The oldest are dropped
       first, and dropped again automatically when the body approaches the
@@ -74,6 +87,8 @@ runs:
         HISTORY_PR_NUMBER: ${{ inputs.pr-number }}
         HISTORY_RECONCILE: ${{ inputs.history-reconcile }}
         HISTORY_MAX_COMMITS: ${{ inputs.history-max-commits }}
+        HISTORY_TZ: ${{ inputs.history-timezone }}
+        HISTORY_TZ_LABEL: ${{ inputs.history-timezone-label }}
         HISTORY_LIB: ${{ github.action_path }}
       with:
         script: |
@@ -132,6 +147,8 @@ runs:
                 startedAt: process.env.CI_ON_DEMAND_STARTED_AT,
                 reconcile: process.env.HISTORY_RECONCILE === 'true',
                 maxCommits: Number(process.env.HISTORY_MAX_COMMITS || '20'),
+                timeZone: process.env.HISTORY_TZ || 'UTC',
+                timeZoneLabel: process.env.HISTORY_TZ_LABEL || '',
               });
             } catch (e) {
               core.warning(`run-history table not updated: ${e.message}`);

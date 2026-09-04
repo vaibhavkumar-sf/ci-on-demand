@@ -64,6 +64,8 @@ jobs:
 | `pr-number` | no | `''` | PR whose description carries the run-history table. **Empty turns the table off**, so existing callers are unaffected. |
 | `history` | no | `true` | Maintain the table. Needs `pull-requests: write` and a `pr-number`. |
 | `history-reconcile` | no | `true` | Also read the branch's dispatched runs from the Actions API. One extra REST call. |
+| `history-timezone` | no | `UTC` | IANA zone the Started column renders in, e.g. `Asia/Kolkata`. |
+| `history-timezone-label` | no | zone id | What the column is headed, e.g. `IST`. |
 | `history-max-commits` | no | `20` | How many commits the table keeps. |
 
 `cancelled` is reported as the `error` state, which reads as "did not complete".
@@ -118,6 +120,24 @@ several seconds into the job (the runner has to be claimed and this action downl
 so on its own it under-reports a short check and disagrees with rows reconciliation had to
 rebuild. Older rows travel in a JSON payload inside the start marker — **the PR body is
 the store**, and rendered markdown is never parsed back into data.
+
+### Who requested it
+
+`github.actor` and `triggering_actor` are **both** `github-actions[bot]` on a label-driven
+run, because the dispatcher uses `GITHUB_TOKEN`. So the column is filled from the PR's issue
+timeline, which keeps the `labeled` event and its actor even after the label is removed
+seconds later: the newest `ci:*` label added within ten minutes before the run started wins,
+and otherwise the triggering actor stands (which is the right answer for an Actions-tab run).
+That needs **`issues: read`**.
+
+Passing the login as a dispatch input would be exact rather than inferred. It was rejected
+because a dispatch carrying an input the target workflow does not declare fails with **422**,
+so every already-open PR would break until it was updated from the default branch.
+
+### Times
+
+Stored as UTC, rendered in `history-timezone`. Changing the zone re-renders history already
+in the body rather than stranding old rows in the old zone.
 
 The job needs **`actions: read`** for that, on top of `pull-requests: write` — a
 `permissions:` block sets every scope it does not name to `none`, so omitting it makes the
