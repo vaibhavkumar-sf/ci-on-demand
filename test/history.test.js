@@ -244,6 +244,17 @@ test('a real context survives repeated reconciliation, not just one round', () =
   assert.ok(!stored[0].w, 'the reconstructed-name flag outlived the reconstructed name');
 });
 
+test('a row already carrying the stale flag is not renamed either', () => {
+  // The data written by the version that had the bug: a correct context with
+  // the reconstructed-name flag beside it. A rule keyed on the flag would
+  // rename precisely these rows.
+  const poisoned = run({c: 'trivy', w: 1});
+  const api = run({c: 'Trivy Scan', w: 1});
+  let stored = [poisoned];
+  for (let i = 0; i < 5; i++) stored = H.mergeEntries(stored, [api]);
+  assert.strictEqual(stored[0].c, 'trivy', 'a pre-existing row was renamed by the API');
+});
+
 test('a reconstructed name is replaced once the real context is known', () => {
   const reconstructed = run({c: 'Trivy Scan', w: 1});
   const real = run({c: 'trivy'});
