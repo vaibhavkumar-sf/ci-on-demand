@@ -210,15 +210,33 @@ test('a body near the limit is trimmed instead of rejected by GitHub', () => {
   assert.ok(out.startsWith(filler), 'existing body was damaged while trimming');
 });
 
-test('mergeEntries: own run beats stored beats reconciled on the same attempt', () => {
-  const reconciled = run({s: 'in_progress', d: null, c: 'Trivy Scan'});
+test('mergeEntries: the running check beats the API, which beats what is stored', () => {
   const stored = run({s: 'in_progress', m: 'feat: x'});
+  const reconciled = run({s: 'in_progress', d: null, c: 'Trivy Scan', w: 1});
   const mine = run({s: 'success', d: 94});
-  const merged = H.mergeEntries([reconciled], [stored], [mine]);
+  const merged = H.mergeEntries([stored], [reconciled], [mine]);
   assert.strictEqual(merged.length, 1);
   assert.strictEqual(merged[0].s, 'success');
-  assert.strictEqual(merged[0].c, 'trivy');
+  assert.strictEqual(merged[0].c, 'trivy', 'the workflow name overwrote the status context');
   assert.strictEqual(merged[0].m, 'feat: x', 'a known commit subject was lost');
+});
+
+test('a finished run has its duration corrected by the next check', () => {
+  // The row a run writes for itself is written BEFORE the job tears down, so it
+  // under-reports; once the run is complete the API is authoritative.
+  const stored = run({s: 'success', d: 52});
+  const reconciled = run({s: 'success', d: 61, c: 'Trivy Scan', w: 1});
+  const [merged] = H.mergeEntries([stored], [reconciled]);
+  assert.strictEqual(merged.d, 61, 'the stale in-process duration was kept');
+  assert.strictEqual(merged.c, 'trivy', 'the status context was lost to the workflow name');
+});
+
+test('a reconstructed name is replaced once the real context is known', () => {
+  const reconstructed = run({c: 'Trivy Scan', w: 1});
+  const real = run({c: 'trivy'});
+  const [merged] = H.mergeEntries([reconstructed], [real]);
+  assert.strictEqual(merged.c, 'trivy');
+  assert.ok(!merged.w, 'the workflow-name flag outlived the workflow name');
 });
 
 test('mergeEntries: a re-run is a new row, not a replacement', () => {

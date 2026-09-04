@@ -164,6 +164,12 @@ the whole body as `everything-before-the-separator + its own sections` and **dro
 followed**. A table appended to the bottom would be deleted by the next review. Above the
 separator it is in the half that action preserves verbatim.
 
+A row is corrected as well as recovered. The row a run writes for itself is necessarily
+written before the job tears down, so it under-reports — a 61s run recorded itself as 52s.
+Once the run is complete the API is authoritative, so the next check to write replaces the
+duration. The running check still outranks both, because the API calls it `in_progress` at the
+instant it asks and only `job.status` knows how it ended.
+
 Writers still race. Because the payload is re-read and re-merged on every write, a lost
 update self-heals on the next one, and the write is verified and retried once. Failures are
 warnings: the commit status is published *before* the table, so a broken table can never turn
