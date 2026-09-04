@@ -8,6 +8,8 @@ check workflow:
 
 1. **Publishes the check's result as a commit status**, so the PR merge box keeps showing it.
 2. **Releases the `ci:*` label** that requested the check, so it can be requested again.
+3. **Keeps a run-history table in the PR description**, because a commit status remembers
+   only the latest result.
 
 ## Why a commit status
 
@@ -59,8 +61,90 @@ jobs:
 | `label` | no | `context` | Human name used in the status description. |
 | `status` | no | `''` | Empty reports *pending*. Pass `${{ job.status }}` to report the result. |
 | `consume-label` | no | `true` | Release the `ci:*` label. Set `false` on the second and later calls in a job that reports more than one context. |
+| `pr-number` | no | `''` | PR whose description carries the run-history table. **Empty turns the table off**, so existing callers are unaffected. |
+| `history` | no | `true` | Maintain the table. Needs `pull-requests: write` and a `pr-number`. |
+| `history-reconcile` | no | `true` | Also read the branch's dispatched runs from the Actions API. One extra REST call. |
+| `history-max-commits` | no | `20` | How many commits the table keeps. |
 
 `cancelled` is reported as the `error` state, which reads as "did not complete".
+
+## The run-history table
+
+A commit status holds exactly **one state per context per SHA**. Re-request a check, or push
+a commit, and the previous result is gone from the PR — there is no record that `ci:verify`
+passed twice and failed once, or that `trivy` took 90s yesterday and four minutes today.
+
+Pass `pr-number` and the closing call maintains a table in the PR description instead:
+
+```yaml
+      - uses: vaibhavkumar-sf/ci-on-demand@v1
+        if: always()
+        with:
+          context: trivy
+          label: Trivy scan
+          status: '${{ job.status }}'
+          pr-number: ${{ inputs.pr_number }}   # a dispatched run has no pull_request payload
+```
+
+The job also needs `pull-requests: write`.
+
+```markdown
+### CI run history
+
+<details open><summary><code>4102cf2</code> — feat(ci): opt-in coverage · 3 runs</summary>
+
+| Check | Result | Started (UTC) | Took | # | Requested by | Logs |
+| --- | --- | --- | --- | --- | --- | --- |
+| npm lint | ✅ success | 2026-09-04 09:12 | 11m 42s | 1 | github-actions[bot] | [run](…) |
+| trivy | ❌ failure | 2026-09-04 09:12 | 1m 34s | 1 | github-actions[bot] | [run](…) |
+| trivy | ✅ success | 2026-09-04 09:31 | 1m 29s | 2 | a-human | [run](…) |
+
+</details>
+```
+
+### Why it is written from this step
+
+The same reason the label is released here: **GitHub rounds every job up to a whole minute**.
+A workflow that existed only to write this table would bill a full minute per check. This
+step is already running, already has an authenticated Octokit, and already knows the job's
+result — the table costs two REST calls inside a job you have already paid for.
+
+### Where the data comes from
+
+Mostly not the API. The run writing the row *is* the run being described, so its status, SHA,
+attempt, actor and run id come from `context`, and its start time from an env var the opening
+call exported. Older rows travel in a JSON payload inside the start marker — **the PR body is
+the store**, and rendered markdown is never parsed back into data.
+
+`history-reconcile` adds one `listWorkflowRunsForRepo` call, filtered to
+`event == workflow_dispatch` so the dispatcher workflow never appears in its own table. It
+covers the two cases the local context cannot: a row lost when two checks finished in the
+same second and read-modify-wrote the same body, and a run whose job never started at all
+(cancelled while queued, `startup_failure`).
+
+### Where the block sits, and how it survives other writers
+
+Delimited by `<!-- ci-run-history:start … -->` and `<!-- ci-run-history:end -->`, and **not
+one byte outside those markers is ever read or modified**. Placement, in order: replace in
+place if the markers exist (so a block someone moved stays moved) → otherwise insert
+immediately *above* an `----AI-description----` separator → otherwise append.
+
+That middle rule matters if you also run
+[`ai-pr-review-action`](https://github.com/vaibhavkumar-sf/ai-pr-review-action): it rebuilds
+the whole body as `everything-before-the-separator + its own sections` and **drops whatever
+followed**. A table appended to the bottom would be deleted by the next review. Above the
+separator it is in the half that action preserves verbatim.
+
+Writers still race. Because the payload is re-read and re-merged on every write, a lost
+update self-heals on the next one, and the write is verified and retried once. Failures are
+warnings: the commit status is published *before* the table, so a broken table can never turn
+a check red.
+
+Two hazards handled in code, worth knowing if you edit it:
+
+- A `--` anywhere in the payload would terminate the HTML comment and render the rest of the
+  description as visible text. Every run of hyphens is escaped to `\u002d`.
+- A `|` in a commit subject or a login would add a column. Both are escaped.
 
 ### Reporting two contexts from one job
 
@@ -87,6 +171,14 @@ git tag -f v1     -m v1     && git push -f origin v1
 ```
 
 Do not cut a `v1.0.1` without also moving `v1`, or nobody sees the fix.
+
+Run `npm test` first — it is plain `node`, no dependencies, and covers the body splice, the
+marker escaping, the trimming and the retry.
+
+Consumers pinning a **SHA** rather than `@v1` (which is what a security review will ask for)
+need the new commit SHA. `v1` is an *annotated* tag, so resolve it with
+`gh api repos/vaibhavkumar-sf/ci-on-demand/commits/v1 --jq .sha` — the SHA under
+`git/ref/tags/v1` is the tag object and will not resolve as a `uses:` ref.
 
 **Never put a `${{ }}` expression in this file's `description:` fields**, not even inside
 backticks. GitHub evaluates action metadata as a template, so prose mentioning

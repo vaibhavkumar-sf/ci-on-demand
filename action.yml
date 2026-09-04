@@ -1,14 +1,21 @@
 name: 'On-demand CI check status'
 description: >-
-  Publishes a commit status for an on-demand CI check, and consumes the `ci:*`
-  label that requested it. Call it twice per job: once first with no `status`,
-  once last with the job's own status under `if: always()`.
+  Publishes a commit status for an on-demand CI check, consumes the `ci:*` label
+  that requested it, and maintains a run-history table in the PR description.
+  Call it twice per job: once first with no `status`, once last with the job's
+  own status under `if: always()`.
 
   Why a commit status and not the job's own check row: the PR merge box draws
   only the NEWEST run of each workflow, so a check's row is replaced by a later
   request's skipped placeholder. A commit status belongs to no workflow run and
   no check suite, so nothing can hide it - the same reason a code-scanning row
   always persists.
+
+  Why the history table is written from here rather than a workflow of its own:
+  a commit status holds one state per context per SHA, so a re-request erases
+  the previous result, and GitHub rounds EVERY job up to a whole minute - a job
+  that existed only to write the table would cost a billed minute per check.
+  This step is already running.
 
 inputs:
   context:
@@ -28,6 +35,31 @@ inputs:
       second and later calls in a job that reports more than one context.'
     required: false
     default: 'true'
+  pr-number:
+    description: 'PR whose description carries the run-history table. Leave it
+      empty to turn the table off, which is what every existing caller gets. A
+      dispatched run has no pull_request payload, so pass the pr_number input
+      the workflow itself declares.'
+    required: false
+    default: ''
+  history:
+    description: 'Maintain the run-history table in the PR description. Needs
+      `pull-requests: write` and a `pr-number`.'
+    required: false
+    default: 'true'
+  history-reconcile:
+    description: 'Also read the dispatched runs on this branch from the Actions
+      API when writing the table. One extra REST call. It recovers a row lost
+      when two checks finish in the same second, and records a run whose job
+      never started (cancelled while queued, or startup_failure).'
+    required: false
+    default: 'true'
+  history-max-commits:
+    description: 'How many commits the table keeps. The oldest are dropped
+      first, and dropped again automatically when the body approaches the
+      65,536-character limit GitHub puts on a PR description.'
+    required: false
+    default: '20'
 
 runs:
   using: composite
@@ -38,6 +70,11 @@ runs:
         CHECK_LABEL: ${{ inputs.label || inputs.context }}
         CHECK_STATUS: ${{ inputs.status }}
         CONSUME_LABEL: ${{ inputs.consume-label }}
+        HISTORY_ENABLED: ${{ inputs.history }}
+        HISTORY_PR_NUMBER: ${{ inputs.pr-number }}
+        HISTORY_RECONCILE: ${{ inputs.history-reconcile }}
+        HISTORY_MAX_COMMITS: ${{ inputs.history-max-commits }}
+        HISTORY_LIB: ${{ github.action_path }}
       with:
         script: |
           const {CHECK_CONTEXT, CHECK_LABEL, CHECK_STATUS, CONSUME_LABEL} = process.env;
@@ -62,6 +99,13 @@ runs:
             }
           }
 
+          // The opening call stamps the clock. The job's own start is not
+          // otherwise available to the closing call without an API round trip,
+          // and GITHUB_ENV carries it across steps for free.
+          if (!CHECK_STATUS) {
+            core.exportVariable('CI_ON_DEMAND_STARTED_AT', new Date().toISOString());
+          }
+
           await github.rest.repos.createCommitStatus({
             ...context.repo,
             sha,
@@ -74,3 +118,22 @@ runs:
             description: `${CHECK_LABEL} ${CHECK_STATUS || 'running'}`,
             target_url: url,
           });
+
+          // The table, last and best-effort. The status above is the contract;
+          // this is a convenience, and a convenience must never fail a check.
+          if (CHECK_STATUS && process.env.HISTORY_ENABLED === 'true' && process.env.HISTORY_PR_NUMBER) {
+            try {
+              const {updateRunHistory} = require(`${process.env.HISTORY_LIB}/lib/update.js`);
+              await updateRunHistory({
+                github, context, core,
+                prNumber: process.env.HISTORY_PR_NUMBER,
+                checkName: CHECK_CONTEXT,
+                status: CHECK_STATUS,
+                startedAt: process.env.CI_ON_DEMAND_STARTED_AT,
+                reconcile: process.env.HISTORY_RECONCILE === 'true',
+                maxCommits: Number(process.env.HISTORY_MAX_COMMITS || '20'),
+              });
+            } catch (e) {
+              core.warning(`run-history table not updated: ${e.message}`);
+            }
+          }
