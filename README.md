@@ -112,8 +112,11 @@ result — the table costs two REST calls inside a job you have already paid for
 ### Where the data comes from
 
 Mostly not the API. The run writing the row *is* the run being described, so its status, SHA,
-attempt, actor and run id come from `context`, and its start time from an env var the opening
-call exported. Older rows travel in a JSON payload inside the start marker — **the PR body is
+attempt, actor and run id come from `context`. Its start time comes from `run_started_at` when
+reconciliation is on, and otherwise from an env var the opening call exported — that stamp is
+several seconds into the job (the runner has to be claimed and this action downloaded first),
+so on its own it under-reports a short check and disagrees with rows reconciliation had to
+rebuild. Older rows travel in a JSON payload inside the start marker — **the PR body is
 the store**, and rendered markdown is never parsed back into data.
 
 The job needs **`actions: read`** for that, on top of `pull-requests: write` — a

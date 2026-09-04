@@ -126,6 +126,25 @@ process.env.GITHUB_TRIGGERING_ACTOR = 'github-actions[bot]';
     assert.ok(!entries.some(e => e.r === 333), 'ci.yml leaked into the table');
   });
 
+  await test('our own duration is measured from the run start, not the step start', async () => {
+    // The env stamp is set by the opening step, several seconds into the job.
+    // Reconciled rows use run_started_at, so the local path has to as well or
+    // the same check reads shorter when it wrote its own row than when the row
+    // had to be reconstructed.
+    const startedAt = new Date(Date.now() - 200000).toISOString();   // run start
+    const {github, state} = stub({
+      runs: [{id: 111, run_attempt: 1, event: 'workflow_dispatch', name: 'Trivy Scan',
+        status: 'in_progress', conclusion: null, head_sha: context.sha,
+        run_started_at: startedAt, updated_at: new Date().toISOString(),
+        triggering_actor: {login: 'github-actions[bot]'}}],
+    });
+    // Stamp says 10s; the API says 200s. The API must win.
+    await updateRunHistory({...BASE, github, startedAt: new Date(Date.now() - 10000).toISOString()});
+    const [entry] = H.readEntries(state.body);
+    assert.ok(entry.d >= 199 && entry.d <= 202, `duration was ${entry.d}, expected ~200`);
+    assert.strictEqual(entry.s, 'success', 'the conclusion must still come from job.status');
+  });
+
   await test('the API never downgrades our own run to in_progress', async () => {
     const {github, state} = stub({
       runs: [{id: 111, run_attempt: 1, event: 'workflow_dispatch', name: 'Trivy Scan',
