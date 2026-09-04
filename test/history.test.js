@@ -113,6 +113,18 @@ test('a real separator on its own line still wins', () => {
   assert.ok(out.indexOf(H.START_PREFIX) < out.indexOf('\n----AI-description----'));
 });
 
+test('a body edited in the GitHub web UI (CRLF) still finds the separator', () => {
+  // ECMAScript counts \r as a line terminator, so a multiline `$` matches
+  // before it. Pinned because it is not true of Python or PCRE, and a rewrite
+  // of AI_SEPARATOR_RE that "fixes" the anchor could quietly lose it - the
+  // block would then append at the end and the next review would delete it.
+  const crlf = AI_BODY.replace(/\n/g, '\r\n');
+  assert.ok(H.AI_SEPARATOR_RE.test(crlf), 'separator not found in a CRLF body');
+  const out = H.buildBody(crlf, [run()], OPTS);
+  assert.ok(out.indexOf(H.START_PREFIX) < out.indexOf('----AI-description----'));
+  assert.ok(out.includes('It does things.'), 'the AI half was lost');
+});
+
 test('second write replaces in place, adds a row, and touches nothing else', () => {
   const first = H.buildBody(AI_BODY, [run()], OPTS);
   const second = H.buildBody(first, [run(), run({r: 2, s: 'failure', at: '2026-09-04T09:31:00Z'})], OPTS);
