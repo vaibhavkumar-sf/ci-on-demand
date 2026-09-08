@@ -245,6 +245,25 @@ process.env.GITHUB_TRIGGERING_ACTOR = 'github-actions[bot]';
     assert.strictEqual(H.readEntries(state.body)[0].by, 'github-actions[bot]');
   });
 
+  // A check dispatched at the repository default branch (so that its cache
+  // lands in the shared scope) runs with that branch's tip in `context.sha`.
+  // The row must still be filed under the PR's own head commit, or the table
+  // groups it under a commit the PR never contained.
+  await test('headSha overrides context.sha for the row it files', async () => {
+    const {github, state} = stub();
+    const prHead = 'deadbeef00112233445566778899aabbccddeeff';
+    await updateRunHistory({...BASE, github, reconcile: false, headSha: prHead});
+    assert.strictEqual(H.readEntries(state.body)[0].sha, prHead.slice(0, 12),
+      'the row must carry the PR head, not the dispatched ref tip');
+  });
+
+  await test('without headSha the row still falls back to context.sha', async () => {
+    const {github, state} = stub();
+    await updateRunHistory({...BASE, github, reconcile: false});
+    assert.strictEqual(H.readEntries(state.body)[0].sha, context.sha.slice(0, 12),
+      'the four checks that pass no headSha must be unaffected');
+  });
+
   await test('a reconcile failure does not lose the stored history', async () => {
     const {github, state} = stub();
     github.rest.actions.listWorkflowRunsForRepo = async () => { throw new Error('403'); };

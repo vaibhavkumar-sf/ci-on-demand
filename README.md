@@ -62,6 +62,7 @@ jobs:
 | `status` | no | `''` | Empty reports *pending*. Pass `${{ job.status }}` to report the result. |
 | `consume-label` | no | `true` | Release the `ci:*` label. Set `false` on the second and later calls in a job that reports more than one context. |
 | `pr-number` | no | `''` | PR whose description carries the run-history table. **Empty turns the table off**, so existing callers are unaffected. |
+| `head-sha` | no | `''` | Commit the status is published on, and the commit the history row is filed under. Only needed when the run is **not** on the PR head — see below. Empty keeps the existing behaviour. |
 | `history` | no | `true` | Maintain the table. Needs `pull-requests: write` and a `pr-number`. |
 | `history-reconcile` | no | `true` | Also read the branch's dispatched runs from the Actions API. One extra REST call. |
 | `history-timezone` | no | `UTC` | IANA zone the Started column renders in, e.g. `Asia/Kolkata`. |
@@ -69,6 +70,46 @@ jobs:
 | `history-max-commits` | no | `20` | How many commits the table keeps. |
 
 `cancelled` is reported as the `error` state, which reads as "did not complete".
+
+### `head-sha`: when the run is not on the PR head
+
+By default the status goes on `context.payload.pull_request?.head?.sha || context.sha`.
+That is right for a `pull_request` run (where `github.sha` is the merge commit the PR
+does not display statuses for) and for a check dispatched at the PR's own head branch.
+
+It is **wrong** for a check dispatched at the repository default branch — a thing worth
+doing, because a run's Actions **cache scope is its ref**: dispatch every PR's check at
+`dev` and they all share one cache entry instead of writing a private copy per branch.
+But then `context.sha` is `dev`'s tip, and the status would be published on a commit the
+PR does not contain, so it never appears in the merge box.
+
+Resolve the head once in the workflow and pass it to both the checkout and this action,
+so the commit scanned and the commit reported on cannot disagree if a push lands mid-run:
+
+```yaml
+      - uses: actions/github-script@v7
+        id: pr
+        with:
+          script: |
+            const {data} = await github.rest.pulls.get({
+              ...context.repo, pull_number: Number(process.env.PR_NUMBER),
+            });
+            core.setOutput('sha', data.head.sha);
+        env: {PR_NUMBER: '${{ inputs.pr_number }}'}
+
+      - uses: actions/checkout@v4
+        with: {ref: '${{ steps.pr.outputs.sha }}'}
+
+      - uses: vaibhavkumar-sf/ci-on-demand@<sha> # v1
+        with:
+          context: 'trivy'
+          head-sha: ${{ steps.pr.outputs.sha }}
+          pr-number: ${{ inputs.pr_number }}
+          # `context.sha` is the default branch tip for every PR's run, so the
+          # API's branch-filtered run list cannot tell one PR's runs from
+          # another's. Turn the best-effort recovery call off.
+          history-reconcile: 'false'
+```
 
 ## The run-history table
 

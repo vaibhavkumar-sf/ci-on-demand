@@ -42,6 +42,16 @@ inputs:
       the workflow itself declares.'
     required: false
     default: ''
+  head-sha:
+    description: 'Commit the status is published on. Only needed when the run is
+      NOT on the PR head - a check dispatched at the default branch, for example,
+      where `github.sha` is the default branch tip and the status would land on
+      the wrong commit. Resolve it once in the workflow (`pulls.get`) and pass the
+      same value here and to `actions/checkout`, so the commit scanned and the
+      commit reported on cannot disagree if a push lands mid-run. Left empty, the
+      existing behaviour is unchanged.'
+    required: false
+    default: ''
   history:
     description: 'Maintain the run-history table in the PR description. Needs
       `pull-requests: write` and a `pr-number`.'
@@ -82,6 +92,7 @@ runs:
         CHECK_CONTEXT: ${{ inputs.context }}
         CHECK_LABEL: ${{ inputs.label || inputs.context }}
         CHECK_STATUS: ${{ inputs.status }}
+        CHECK_HEAD_SHA: ${{ inputs.head-sha }}
         CONSUME_LABEL: ${{ inputs.consume-label }}
         HISTORY_ENABLED: ${{ inputs.history }}
         HISTORY_PR_NUMBER: ${{ inputs.pr-number }}
@@ -95,8 +106,14 @@ runs:
           const {CHECK_CONTEXT, CHECK_LABEL, CHECK_STATUS, CONSUME_LABEL} = process.env;
           const url = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
           // The head SHA, not github.sha: on a pull_request event that is the
-          // merge commit, which the PR does not display statuses for.
-          const sha = context.payload.pull_request?.head?.sha || context.sha;
+          // merge commit, which the PR does not display statuses for. And
+          // `context.sha` is only the PR head while the run is ON the PR head -
+          // a check dispatched at the default branch gets that branch's tip, so
+          // the status would be published on a commit the PR does not show.
+          // `head-sha` is the caller saying which commit this run is about.
+          const sha = process.env.CHECK_HEAD_SHA
+            || context.payload.pull_request?.head?.sha
+            || context.sha;
 
           // Starting: release the trigger label so the check can be asked for
           // again. Done in a step of the check itself rather than a job of its
@@ -143,6 +160,11 @@ runs:
                 github, context, core,
                 prNumber: process.env.HISTORY_PR_NUMBER,
                 checkName: CHECK_CONTEXT,
+                // The same commit the status went on. The table groups rows by
+                // commit, so a run dispatched at the default branch would
+                // otherwise file its row under that branch's tip - a commit the
+                // PR does not contain.
+                headSha: sha,
                 status: CHECK_STATUS,
                 startedAt: process.env.CI_ON_DEMAND_STARTED_AT,
                 reconcile: process.env.HISTORY_RECONCILE === 'true',
